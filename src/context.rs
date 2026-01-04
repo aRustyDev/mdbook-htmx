@@ -87,7 +87,7 @@ pub struct BookConfig {
     pub output: HashMap<String, toml::Value>,
 }
 
-/// Book metadata from [book] section.
+/// Book metadata from `[book]` section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookMetadata {
     /// Book title
@@ -117,7 +117,7 @@ fn default_language() -> String {
     "en".to_string()
 }
 
-/// Build configuration from [build] section.
+/// Build configuration from `[build]` section.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct BuildConfig {
     /// Build directory (default: "book")
