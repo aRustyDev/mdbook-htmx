@@ -1,6 +1,15 @@
 //! Rendering logic for mdbook-htmx.
 //!
-//! Handles Markdown to HTML conversion using pulldown-cmark.
+//! Handles Markdown to HTML conversion using pulldown-cmark,
+//! HTMX attribute injection, and OOB swap generation.
+
+pub mod htmx;
+pub mod oob;
+
+pub use htmx::{inject_htmx_attrs, nav_link_attrs, preload_hint};
+pub use oob::{
+    render_oob_updates, Breadcrumb, BreadcrumbContext, NavItem, OobUpdates, SidebarContext,
+};
 
 use pulldown_cmark::{html, Options, Parser};
 

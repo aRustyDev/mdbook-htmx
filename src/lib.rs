@@ -25,6 +25,7 @@ pub use error::BuildError;
 
 use crate::frontmatter::Frontmatter;
 use crate::manifest::{Manifest, PageEntry};
+use crate::render::oob::{render_oob_updates, NavItem, SidebarContext};
 
 /// The main renderer that processes MDBook content and produces HTMX-enhanced HTML.
 pub struct HtmxRenderer {
@@ -127,8 +128,12 @@ impl HtmxRenderer {
             let next_chapter = chapters.get(idx + 1);
 
             // Render the chapter
-            let rendered =
-                self.render_chapter(chapter, prev_chapter.copied(), next_chapter.copied())?;
+            let rendered = self.render_chapter(
+                chapter,
+                prev_chapter.copied(),
+                next_chapter.copied(),
+                &chapters,
+            )?;
 
             // Write output files
             self.write_chapter(&rendered)?;
@@ -187,6 +192,7 @@ impl HtmxRenderer {
         chapter: &Chapter,
         prev: Option<&Chapter>,
         next: Option<&Chapter>,
+        all_chapters: &[&Chapter],
     ) -> Result<RenderedChapter> {
         let path = chapter.path.as_ref().unwrap();
 
@@ -265,6 +271,46 @@ impl HtmxRenderer {
                 );
             }
         }
+
+        // Build navigation sidebar context
+        let active_path = self.path_to_url(path);
+        let nav_items: Vec<NavItem> = all_chapters
+            .iter()
+            .filter_map(|ch| {
+                ch.path.as_ref().map(|p| {
+                    let url = self.path_to_url(p);
+                    let is_active = url == active_path;
+                    NavItem {
+                        title: ch.name.clone(),
+                        path: url.clone(),
+                        is_active,
+                        children: vec![],
+                        is_expanded: is_active || active_path.starts_with(&url),
+                        number: ch.number.as_ref().map(|nums| {
+                            nums.iter()
+                                .map(|n| n.to_string())
+                                .collect::<Vec<_>>()
+                                .join(".")
+                        }),
+                    }
+                })
+            })
+            .collect();
+
+        let sidebar_ctx = SidebarContext {
+            items: nav_items,
+            active_path: active_path.clone(),
+        };
+        context.insert("sidebar", &sidebar_ctx);
+        context.insert(
+            "navigation",
+            &serde_json::json!({ "items": sidebar_ctx.items }),
+        );
+
+        // Generate OOB updates for fragment
+        let oob_updates =
+            render_oob_updates(&self.tera, chapter, all_chapters, &active_path).unwrap_or_default();
+        context.insert("oob_updates", &oob_updates.to_html());
 
         // Render full page
         let page = self

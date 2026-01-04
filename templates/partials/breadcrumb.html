@@ -1,0 +1,19 @@
+{# templates/partials/breadcrumb.html - Breadcrumb navigation trail #}
+<ol class="breadcrumb-list" aria-label="Breadcrumb">
+    {% for crumb in breadcrumb.crumbs %}
+    <li class="breadcrumb-item {% if crumb.is_current %}current{% endif %}">
+        {% if crumb.is_current %}
+        <span aria-current="page">{{ crumb.title }}</span>
+        {% else %}
+        <a href="{{ crumb.path }}"
+           hx-get="{{ crumb.path }}"
+           hx-target="#content"
+           hx-swap="innerHTML show:window:top"
+           hx-push-url="true">{{ crumb.title }}</a>
+        <svg class="breadcrumb-separator" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ol>
