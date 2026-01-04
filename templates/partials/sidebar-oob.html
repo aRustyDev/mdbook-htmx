@@ -1,0 +1,50 @@
+{# templates/partials/sidebar-oob.html - Sidebar navigation for OOB swaps #}
+<ul class="nav-list" role="tree">
+    {% for item in sidebar.items %}
+    <li class="nav-item {% if item.is_active %}active{% endif %} {% if item.is_expanded %}expanded{% endif %}"
+        role="treeitem"
+        aria-selected="{{ item.is_active }}">
+        <a href="{{ item.path }}"
+           class="nav-link {% if item.is_active %}active{% endif %}"
+           hx-get="{{ item.path }}"
+           hx-target="#content"
+           hx-swap="innerHTML show:window:top"
+           hx-push-url="true"
+           {% if item.is_active %}aria-current="page"{% endif %}>
+            {% if item.number %}
+            <span class="nav-number">{{ item.number }}</span>
+            {% endif %}
+            <span class="nav-title">{{ item.title }}</span>
+        </a>
+        {% if item.children | length > 0 %}
+        <button class="nav-toggle"
+                aria-expanded="{{ item.is_expanded }}"
+                aria-label="Toggle {{ item.title }} section">
+            <svg class="toggle-icon" viewBox="0 0 24 24" width="16" height="16">
+                <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2"/>
+            </svg>
+        </button>
+        <ul class="nav-children" role="group">
+            {% for child in item.children %}
+            <li class="nav-item {% if child.is_active %}active{% endif %}"
+                role="treeitem"
+                aria-selected="{{ child.is_active }}">
+                <a href="{{ child.path }}"
+                   class="nav-link {% if child.is_active %}active{% endif %}"
+                   hx-get="{{ child.path }}"
+                   hx-target="#content"
+                   hx-swap="innerHTML show:window:top"
+                   hx-push-url="true"
+                   {% if child.is_active %}aria-current="page"{% endif %}>
+                    {% if child.number %}
+                    <span class="nav-number">{{ child.number }}</span>
+                    {% endif %}
+                    <span class="nav-title">{{ child.title }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>

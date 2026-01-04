@@ -16,6 +16,19 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
         "docs/fragment.html",
         include_str!("../../templates/docs/fragment.html"),
     ),
+    ("nav.html", include_str!("../../templates/nav.html")),
+    (
+        "partials/sidebar-oob.html",
+        include_str!("../../templates/partials/sidebar-oob.html"),
+    ),
+    (
+        "partials/breadcrumb.html",
+        include_str!("../../templates/partials/breadcrumb.html"),
+    ),
+    (
+        "partials/loading.html",
+        include_str!("../../templates/partials/loading.html"),
+    ),
 ];
 
 /// Initialize the Tera template engine with embedded templates.

@@ -28,4 +28,16 @@
         {% endif %}
     </nav>
     {% endif %}
+
+    {% if page.htmx.lazy | default(value=false) %}
+    <div hx-get="{{ page.path }}/extended"
+         hx-trigger="revealed"
+         hx-swap="outerHTML"
+         class="lazy-content-placeholder">
+        <span class="sr-only">Loading additional content...</span>
+    </div>
+    {% endif %}
 </article>
+
+{# OOB updates for sidebar and breadcrumb #}
+{{ oob_updates | safe }}

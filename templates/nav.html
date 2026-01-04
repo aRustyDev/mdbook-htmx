@@ -1,0 +1,39 @@
+{# templates/nav.html - Main navigation component #}
+<nav class="doc-nav" aria-label="Documentation navigation">
+    <div class="nav-header">
+        <a href="/" class="nav-brand" hx-boost="true" hx-target="#content" hx-push-url="true">
+            {% if config.book.title %}
+            <span class="nav-brand-text">{{ config.book.title }}</span>
+            {% endif %}
+        </a>
+        <button id="nav-toggle" class="nav-menu-toggle" aria-expanded="false" aria-controls="sidebar">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                <path d="M3 12h18M3 6h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2"/>
+            </svg>
+            <span class="sr-only">Toggle navigation</span>
+        </button>
+    </div>
+
+    <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+        <ul class="nav-list" role="tree">
+            {% for item in navigation.items %}
+            <li class="nav-item {% if item.path == current_path %}active{% endif %}"
+                role="treeitem"
+                aria-selected="{{ item.path == current_path }}">
+                <a href="{{ item.path }}"
+                   class="nav-link {% if item.path == current_path %}active{% endif %}"
+                   hx-boost="true"
+                   hx-target="#content"
+                   hx-swap="innerHTML show:window:top"
+                   hx-push-url="true"
+                   {% if item.path == current_path %}aria-current="page"{% endif %}>
+                    {% if item.number %}
+                    <span class="nav-number">{{ item.number }}</span>
+                    {% endif %}
+                    <span class="nav-title">{{ item.title }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </nav>
+</nav>
