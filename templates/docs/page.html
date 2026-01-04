@@ -1,0 +1,35 @@
+{# templates/docs/page.html - Documentation page template #}
+{% extends "layout.html" %}
+
+{% block content %}
+<article class="doc-page" data-path="{{ page.path }}">
+    <header class="doc-header">
+        <h1 id="page-title">{{ page.title }}</h1>
+        {% if page.description %}
+        <p class="doc-description">{{ page.description }}</p>
+        {% endif %}
+    </header>
+
+    <div class="doc-content" id="doc-content">
+        {{ page.content | safe }}
+    </div>
+
+    {% if config.htmx.navigation.prev_next | default(value=true) %}
+    <nav class="nav-footer" aria-label="Page navigation">
+        {% if prev_page %}
+        <a href="{{ prev_page.path }}" class="nav-prev">
+            <span>&larr; {{ prev_page.title }}</span>
+        </a>
+        {% else %}
+        <span></span>
+        {% endif %}
+
+        {% if next_page %}
+        <a href="{{ next_page.path }}" class="nav-next">
+            <span>{{ next_page.title }} &rarr;</span>
+        </a>
+        {% endif %}
+    </nav>
+    {% endif %}
+</article>
+{% endblock %}
