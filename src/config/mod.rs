@@ -145,6 +145,12 @@ pub struct SearchConfig {
     pub generate_index: bool,
     /// Include content in search index (larger file size)
     pub index_content: bool,
+    /// Maximum heading level to index (1-6, default 3 = up to H3)
+    pub heading_split_level: u8,
+    /// Maximum length of body excerpt in search results (None = full body)
+    pub max_excerpt_length: Option<usize>,
+    /// Include auth metadata in search index for filtering
+    pub include_auth: bool,
 }
 
 impl Default for SearchConfig {
@@ -153,6 +159,9 @@ impl Default for SearchConfig {
             enabled: true,
             generate_index: true,
             index_content: true,
+            heading_split_level: 3,
+            max_excerpt_length: None,
+            include_auth: true,
         }
     }
 }

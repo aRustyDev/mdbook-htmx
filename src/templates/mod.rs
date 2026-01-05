@@ -40,6 +40,11 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ),
     ("401.html", include_str!("../../templates/401.html")),
     ("403.html", include_str!("../../templates/403.html")),
+    // Search templates
+    (
+        "partials/search.html",
+        include_str!("../../templates/partials/search.html"),
+    ),
 ];
 
 /// Initialize the Tera template engine with embedded templates.
@@ -177,5 +182,13 @@ mod tests {
             .any(|n| n == "partials/access-denied.html"));
         assert!(tera.get_template_names().any(|n| n == "401.html"));
         assert!(tera.get_template_names().any(|n| n == "403.html"));
+    }
+
+    #[test]
+    fn test_search_template_loaded() {
+        let tera = init_templates().expect("Failed to initialize templates");
+        assert!(tera
+            .get_template_names()
+            .any(|n| n == "partials/search.html"));
     }
 }
