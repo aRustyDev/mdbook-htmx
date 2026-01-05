@@ -152,11 +152,7 @@ impl HtmxRenderer {
                     page_path: PathBuf::from("pages").join(&rendered.path),
                     fragment_path: PathBuf::from("fragments").join(&rendered.path),
                     scope: rendered.frontmatter.scope.clone(),
-                    authn: rendered
-                        .frontmatter
-                        .authn
-                        .as_ref()
-                        .map(|a| format!("{:?}", a).to_lowercase()),
+                    authn: rendered.frontmatter.authn.as_ref().map(|a| a.to_string()),
                     authz: rendered.frontmatter.authz.clone(),
                     fallback: rendered.frontmatter.fallback.clone(),
                     content_hash: assets::compute_short_hash(rendered.page.as_bytes()),

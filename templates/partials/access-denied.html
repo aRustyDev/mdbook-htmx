@@ -1,0 +1,114 @@
+{# Access denied partial for pages the user doesn't have permission to view #}
+{# Variables: title, message, required_roles, fallback_url, signin_url, is_authenticated #}
+
+<div class="auth-denied" role="region" aria-labelledby="denied-heading">
+    <div class="denied-card">
+        <div class="denied-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+            </svg>
+        </div>
+        <h2 id="denied-heading">{{ title | default(value="Access Denied") }}</h2>
+        <p class="denied-message">
+            {{ message | default(value="You don't have permission to view this content.") }}
+        </p>
+        {% if required_roles %}
+        <p class="denied-roles">
+            Required role{% if required_roles | length > 1 %}s{% endif %}:
+            <span class="role-list">{{ required_roles | join(sep=", ") }}</span>
+        </p>
+        {% endif %}
+        <div class="denied-actions">
+            {% if is_authenticated %}
+            <a href="{{ fallback_url | default(value='/') }}" class="denied-button primary" hx-boost="true">
+                Return Home
+            </a>
+            <a href="{{ signout_url | default(value='/auth/logout') }}" class="denied-button secondary" hx-boost="false">
+                Sign Out
+            </a>
+            {% else %}
+            <a href="{{ signin_url | default(value='/auth/login') }}" class="denied-button primary" hx-boost="false">
+                Sign In
+            </a>
+            <a href="{{ fallback_url | default(value='/') }}" class="denied-button secondary" hx-boost="true">
+                Return Home
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+.auth-denied {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 50vh;
+    padding: 2rem;
+}
+.denied-card {
+    text-align: center;
+    padding: 2rem;
+    max-width: 450px;
+    background: var(--sidebar-bg, #f8f9fa);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #e0e0e0);
+}
+.denied-icon {
+    margin-bottom: 1rem;
+    color: #dc3545;
+}
+.denied-card h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.5rem;
+    color: #dc3545;
+}
+.denied-message {
+    color: #666;
+    margin-bottom: 1rem;
+}
+.denied-roles {
+    font-size: 0.875rem;
+    color: #888;
+    margin-bottom: 1.5rem;
+}
+.role-list {
+    font-family: monospace;
+    background: var(--code-bg, #f5f5f5);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+}
+.denied-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+.denied-button {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    text-decoration: none;
+    border-radius: 4px;
+    font-weight: 500;
+    transition: background-color 0.15s;
+}
+.denied-button.primary {
+    background: var(--link-color, #0066cc);
+    color: #fff !important;
+}
+.denied-button.primary:hover {
+    background: color-mix(in srgb, var(--link-color, #0066cc) 85%, black);
+}
+.denied-button.secondary {
+    background: transparent;
+    color: var(--text-color);
+    border: 1px solid var(--border-color, #e0e0e0);
+}
+.denied-button.secondary:hover {
+    background: var(--nav-hover-bg, #f1f3f5);
+}
+[data-theme="dark"] .denied-message,
+[data-theme="dark"] .denied-roles {
+    color: #aaa;
+}
+</style>
