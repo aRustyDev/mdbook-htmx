@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Search index generation (`search-index.json`)
+  - Full-text content indexing with Markdown stripping
+  - Heading extraction up to configurable level (default H3)
+  - Auth metadata for server-side filtering
+  - Scope filtering for audience-specific indexes
+- Enhanced search configuration (`config::SearchConfig`)
+  - `heading-split-level` - Maximum heading level to index (1-6)
+  - `max-excerpt-length` - Optional body text truncation
+  - `include-auth` - Include auth metadata in index
+- Search module types:
+  - `SearchIndex` - Complete search index with config
+  - `SearchDocument` - Indexed document with headings and auth
+  - `HeadingEntry` - Heading with level, text, and anchor
+  - `DocumentAuth` - Authentication/authorization metadata
+  - `SearchDocumentBuilder` - Builder for creating search documents
+- `partials/search.html` - Search input and results template with HTMX
+- `strip_markdown()` - Convert Markdown to plain text for indexing
 - Authentication configuration (`config::AuthnConfig`)
   - Provider types: `none`, `custom`, `oidc`
   - Configurable signin/signout endpoints

@@ -1,0 +1,70 @@
+{# Search partial template #}
+{# Displays search input and results container #}
+
+<div id="search-container" class="search-container">
+    {# Search input with HTMX attributes #}
+    <div class="search-input-wrapper">
+        <input
+            type="search"
+            id="search-input"
+            name="q"
+            placeholder="Search documentation..."
+            autocomplete="off"
+            hx-get="{{ config.htmx.search_endpoint | default(value='/search') }}"
+            hx-trigger="keyup changed delay:300ms, search"
+            hx-target="#search-results"
+            hx-indicator="#search-loading"
+        />
+        <span id="search-loading" class="htmx-indicator">
+            <svg class="spinner" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+        </span>
+    </div>
+
+    {# Search results container #}
+    <div id="search-results" class="search-results" role="listbox">
+        {# Results are loaded via HTMX #}
+    </div>
+</div>
+
+{# Search result item template - used by server when rendering results #}
+{#
+    Expected context:
+    - results: array of { path, title, headings, excerpt }
+#}
+{% if results is defined %}
+<ul class="search-results-list" role="listbox">
+    {% for result in results %}
+    <li class="search-result-item" role="option">
+        <a href="{{ result.path }}"
+           hx-get="{{ result.path }}"
+           hx-target="{{ config.htmx.target | default(value='#content') }}"
+           hx-push-url="true"
+           class="search-result-link">
+            <span class="search-result-title">{{ result.title }}</span>
+            {% if result.headings %}
+            <ul class="search-result-headings">
+                {% for heading in result.headings | slice(end=3) %}
+                <li>
+                    <a href="{{ result.path }}{{ heading.anchor }}"
+                       hx-get="{{ result.path }}{{ heading.anchor }}"
+                       hx-target="{{ config.htmx.target | default(value='#content') }}"
+                       hx-push-url="true"
+                       class="search-result-heading">
+                        {{ heading.text }}
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if result.excerpt %}
+            <p class="search-result-excerpt">{{ result.excerpt | truncate_words(count=30) }}</p>
+            {% endif %}
+        </a>
+    </li>
+    {% else %}
+    <li class="search-no-results">No results found</li>
+    {% endfor %}
+</ul>
+{% endif %}

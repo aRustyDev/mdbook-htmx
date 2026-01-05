@@ -26,6 +26,7 @@ pub use error::BuildError;
 use crate::frontmatter::Frontmatter;
 use crate::manifest::{Manifest, PageEntry};
 use crate::render::oob::{render_oob_updates, NavItem, SidebarContext};
+use crate::search::{SearchDocumentBuilder, SearchIndex};
 
 /// The main renderer that processes MDBook content and produces HTMX-enhanced HTML.
 pub struct HtmxRenderer {
@@ -98,6 +99,7 @@ impl HtmxRenderer {
     /// - `pages/*.html` - Full HTML pages
     /// - `fragments/*.html` - Content-only fragments for HTMX
     /// - `manifest.json` - Page metadata for server integration
+    /// - `search-index.json` - Search index for client/server-side search
     pub fn render(&self) -> Result<()> {
         info!("Rendering to {}", self.output_dir.display());
 
@@ -106,6 +108,14 @@ impl HtmxRenderer {
 
         // Build manifest as we render
         let mut manifest = Manifest::new();
+
+        // Build search index if enabled
+        let mut search_index = if self.config.search.enabled {
+            Some(SearchIndex::new(&self.config.search))
+        } else {
+            None
+        };
+        let search_builder = SearchDocumentBuilder::new(&self.config.search);
 
         // Collect all chapters for prev/next navigation
         let chapters: Vec<_> = self.ctx.iter_chapters().collect();
@@ -141,7 +151,7 @@ impl HtmxRenderer {
             // Add to manifest
             let url_path = self.path_to_url(path);
             manifest.add_page(
-                url_path,
+                url_path.clone(),
                 PageEntry {
                     title: rendered
                         .frontmatter
@@ -158,11 +168,33 @@ impl HtmxRenderer {
                     content_hash: assets::compute_short_hash(rendered.page.as_bytes()),
                 },
             );
+
+            // Add to search index if enabled
+            if let Some(ref mut index) = search_index {
+                // Get content after frontmatter for indexing
+                let (_, content) = frontmatter::parse_frontmatter(&chapter.content, path)?;
+                let title = rendered
+                    .frontmatter
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| chapter.name.clone());
+
+                if let Some(doc) =
+                    search_builder.build(url_path, title, content, &rendered.frontmatter)
+                {
+                    index.add_document(doc);
+                }
+            }
         }
 
         // Write manifest
         if self.config.search.generate_index {
             self.write_manifest(&manifest)?;
+        }
+
+        // Write search index
+        if let Some(index) = search_index {
+            self.write_search_index(&index)?;
         }
 
         info!("Rendering complete");
@@ -364,6 +396,19 @@ impl HtmxRenderer {
         fs::write(&path, json)
             .with_context(|| format!("Failed to write manifest: {}", path.display()))?;
         info!("Wrote manifest.json with {} pages", manifest.pages.len());
+        Ok(())
+    }
+
+    /// Write search-index.json.
+    fn write_search_index(&self, index: &SearchIndex) -> Result<()> {
+        let path = self.output_dir.join("search-index.json");
+        let json = index.to_json()?;
+        fs::write(&path, json)
+            .with_context(|| format!("Failed to write search index: {}", path.display()))?;
+        info!(
+            "Wrote search-index.json with {} documents",
+            index.documents.len()
+        );
         Ok(())
     }
 
