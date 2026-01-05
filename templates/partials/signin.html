@@ -1,0 +1,67 @@
+{# Sign-in prompt partial for pages requiring authentication #}
+{# Variables: signin_url, return_url, message #}
+
+<div class="auth-signin" role="region" aria-labelledby="signin-heading">
+    <div class="signin-card">
+        <div class="signin-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+            </svg>
+        </div>
+        <h2 id="signin-heading">Sign In Required</h2>
+        <p class="signin-message">
+            {{ message | default(value="Please sign in to view this content.") }}
+        </p>
+        <a href="{{ signin_url | default(value='/auth/login') }}{% if return_url %}?return={{ return_url | urlencode }}{% endif %}"
+           class="signin-button"
+           hx-boost="false">
+            Sign In
+        </a>
+    </div>
+</div>
+
+<style>
+.auth-signin {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 50vh;
+    padding: 2rem;
+}
+.signin-card {
+    text-align: center;
+    padding: 2rem;
+    max-width: 400px;
+    background: var(--sidebar-bg, #f8f9fa);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #e0e0e0);
+}
+.signin-icon {
+    margin-bottom: 1rem;
+    color: var(--link-color, #0066cc);
+}
+.signin-card h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.5rem;
+}
+.signin-message {
+    color: #666;
+    margin-bottom: 1.5rem;
+}
+.signin-button {
+    display: inline-block;
+    padding: 0.75rem 2rem;
+    background: var(--link-color, #0066cc);
+    color: #fff !important;
+    text-decoration: none;
+    border-radius: 4px;
+    font-weight: 500;
+    transition: background-color 0.15s;
+}
+.signin-button:hover {
+    background: color-mix(in srgb, var(--link-color, #0066cc) 85%, black);
+}
+[data-theme="dark"] .signin-message {
+    color: #aaa;
+}
+</style>

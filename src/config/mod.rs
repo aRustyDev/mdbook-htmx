@@ -57,6 +57,14 @@ pub struct HtmxConfig {
 
     /// Custom theme directory path
     pub theme_dir: Option<String>,
+
+    /// Authentication configuration
+    #[serde(default)]
+    pub authn: AuthnConfig,
+
+    /// Authorization configuration
+    #[serde(default)]
+    pub authz: AuthzConfig,
 }
 
 /// HTMX swap strategies.
@@ -171,6 +179,89 @@ impl Default for AssetsConfig {
     }
 }
 
+/// Authentication configuration.
+///
+/// Configures the authentication provider and endpoints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct AuthnConfig {
+    /// Authentication provider type
+    pub provider: AuthnProvider,
+    /// Sign-in page path
+    pub signin: String,
+    /// Sign-out endpoint path
+    pub signout: String,
+    /// User info endpoint for fetching current user
+    pub user_endpoint: Option<String>,
+    /// Session cookie name
+    pub session_cookie: String,
+}
+
+impl Default for AuthnConfig {
+    fn default() -> Self {
+        Self {
+            provider: AuthnProvider::default(),
+            signin: "/auth/login".to_string(),
+            signout: "/auth/logout".to_string(),
+            user_endpoint: None,
+            session_cookie: "session".to_string(),
+        }
+    }
+}
+
+/// Authentication provider types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthnProvider {
+    /// No authentication
+    #[default]
+    None,
+    /// Custom authentication (handled by server)
+    Custom,
+    /// OAuth2/OIDC provider
+    Oidc,
+}
+
+/// Authorization configuration.
+///
+/// Configures access control defaults and behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct AuthzConfig {
+    /// Default access level for pages without explicit configuration
+    pub default_access: DefaultAccess,
+    /// Default fallback page for access denied
+    pub default_fallback: String,
+    /// JWT claim containing user roles
+    pub role_claim: String,
+    /// Enable strict mode (deny if role claim missing)
+    pub strict: bool,
+}
+
+impl Default for AuthzConfig {
+    fn default() -> Self {
+        Self {
+            default_access: DefaultAccess::default(),
+            default_fallback: "/access-denied".to_string(),
+            role_claim: "roles".to_string(),
+            strict: false,
+        }
+    }
+}
+
+/// Default access level for pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DefaultAccess {
+    /// Pages are public by default
+    #[default]
+    Public,
+    /// Pages require authentication by default
+    Authenticated,
+    /// Pages are denied by default (explicit allow required)
+    Denied,
+}
+
 impl Default for HtmxConfig {
     fn default() -> Self {
         Self {
@@ -186,6 +277,8 @@ impl Default for HtmxConfig {
             assets: AssetsConfig::default(),
             default_scope: None,
             theme_dir: None,
+            authn: AuthnConfig::default(),
+            authz: AuthzConfig::default(),
         }
     }
 }
@@ -268,5 +361,53 @@ mod tests {
     fn test_swap_strategy_display() {
         assert_eq!(SwapStrategy::InnerHTML.to_string(), "innerHTML");
         assert_eq!(SwapStrategy::OuterHTML.to_string(), "outerHTML");
+    }
+
+    #[test]
+    fn test_default_authn_config() {
+        let authn = AuthnConfig::default();
+        assert_eq!(authn.provider, AuthnProvider::None);
+        assert_eq!(authn.signin, "/auth/login");
+        assert_eq!(authn.signout, "/auth/logout");
+        assert!(authn.user_endpoint.is_none());
+        assert_eq!(authn.session_cookie, "session");
+    }
+
+    #[test]
+    fn test_default_authz_config() {
+        let authz = AuthzConfig::default();
+        assert_eq!(authz.default_access, DefaultAccess::Public);
+        assert_eq!(authz.default_fallback, "/access-denied");
+        assert_eq!(authz.role_claim, "roles");
+        assert!(!authz.strict);
+    }
+
+    #[test]
+    fn test_htmx_config_includes_auth() {
+        let config = HtmxConfig::default();
+        assert_eq!(config.authn.provider, AuthnProvider::None);
+        assert_eq!(config.authz.default_access, DefaultAccess::Public);
+    }
+
+    #[test]
+    fn test_authn_provider_serialization() {
+        let provider = AuthnProvider::Custom;
+        let json = serde_json::to_string(&provider).unwrap();
+        assert_eq!(json, "\"custom\"");
+
+        let provider = AuthnProvider::Oidc;
+        let json = serde_json::to_string(&provider).unwrap();
+        assert_eq!(json, "\"oidc\"");
+    }
+
+    #[test]
+    fn test_default_access_serialization() {
+        let access = DefaultAccess::Authenticated;
+        let json = serde_json::to_string(&access).unwrap();
+        assert_eq!(json, "\"authenticated\"");
+
+        let access = DefaultAccess::Denied;
+        let json = serde_json::to_string(&access).unwrap();
+        assert_eq!(json, "\"denied\"");
     }
 }

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Authentication configuration (`config::AuthnConfig`)
+  - Provider types: `none`, `custom`, `oidc`
+  - Configurable signin/signout endpoints
+  - Session cookie name setting
+  - User info endpoint for current user
+- Authorization configuration (`config::AuthzConfig`)
+  - Default access levels: `public`, `authenticated`, `denied`
+  - Default fallback page for access denied
+  - JWT role claim configuration
+  - Strict mode option (deny if role claim missing)
+- Frontmatter auth fields
+  - `authn` - Authentication level (`public`, `authenticated`, `verified`)
+  - `authz` - Required roles list
+  - `fallback` - Custom fallback page for access denied
+- Auth templates
+  - `partials/signin.html` - Sign-in prompt partial
+  - `partials/access-denied.html` - Access denied partial
+  - `401.html` - Unauthorized error page
+  - `403.html` - Forbidden error page
+- `AuthnLevel.as_str()` and `Display` implementation
 - HTMX attribute injection module (`render/htmx.rs`)
   - Injects `hx-boost`, `hx-target`, `hx-swap` on `<body>`
   - Generates navigation link attributes
@@ -22,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `partials/sidebar-oob.html` - Sidebar for OOB swaps
   - `partials/breadcrumb.html` - Breadcrumb navigation trail
   - `partials/loading.html` - HTMX loading indicator
+
+### Changed
+
+- `HtmxConfig` now includes `authn` and `authz` configuration
+- Manifest includes auth metadata from frontmatter
+- Updated `render/mod.rs` to export HTMX and OOB modules
+- Enhanced `HtmxRenderer.render_chapter()` to:
+  - Build navigation sidebar context
+  - Generate OOB updates for fragments
+  - Pass all chapters for navigation building
 - Updated layout template with:
   - Sidebar navigation panel
   - Loading spinner indicator
@@ -31,14 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fragment template now includes:
   - OOB update placeholder
   - Lazy loading support
-
-### Changed
-
-- Updated `render/mod.rs` to export HTMX and OOB modules
-- Enhanced `HtmxRenderer.render_chapter()` to:
-  - Build navigation sidebar context
-  - Generate OOB updates for fragments
-  - Pass all chapters for navigation building
 
 ## [0.1.0] - 2024-01-04
 

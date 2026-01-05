@@ -29,6 +29,17 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
         "partials/loading.html",
         include_str!("../../templates/partials/loading.html"),
     ),
+    // Auth templates
+    (
+        "partials/signin.html",
+        include_str!("../../templates/partials/signin.html"),
+    ),
+    (
+        "partials/access-denied.html",
+        include_str!("../../templates/partials/access-denied.html"),
+    ),
+    ("401.html", include_str!("../../templates/401.html")),
+    ("403.html", include_str!("../../templates/403.html")),
 ];
 
 /// Initialize the Tera template engine with embedded templates.
@@ -153,5 +164,18 @@ mod tests {
         assert!(tera.get_template_names().any(|n| n == "layout.html"));
         assert!(tera.get_template_names().any(|n| n == "docs/page.html"));
         assert!(tera.get_template_names().any(|n| n == "docs/fragment.html"));
+    }
+
+    #[test]
+    fn test_auth_templates_loaded() {
+        let tera = init_templates().expect("Failed to initialize templates");
+        assert!(tera
+            .get_template_names()
+            .any(|n| n == "partials/signin.html"));
+        assert!(tera
+            .get_template_names()
+            .any(|n| n == "partials/access-denied.html"));
+        assert!(tera.get_template_names().any(|n| n == "401.html"));
+        assert!(tera.get_template_names().any(|n| n == "403.html"));
     }
 }

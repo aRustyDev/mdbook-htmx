@@ -54,6 +54,23 @@ pub enum AuthnLevel {
     Verified,
 }
 
+impl AuthnLevel {
+    /// Get the string representation matching serde serialization.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Authenticated => "authenticated",
+            Self::Verified => "verified",
+        }
+    }
+}
+
+impl std::fmt::Display for AuthnLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Parse frontmatter from chapter content.
 ///
 /// Frontmatter is delimited by `---` at the start of the file.
@@ -112,5 +129,62 @@ mod tests {
         assert_eq!(fm.title, Some("My Title".to_string()));
         assert_eq!(fm.scope, Some("internal".to_string()));
         assert!(remaining.starts_with("# Hello World"));
+    }
+
+    #[test]
+    fn test_authn_level_display() {
+        assert_eq!(AuthnLevel::Public.to_string(), "public");
+        assert_eq!(AuthnLevel::Authenticated.to_string(), "authenticated");
+        assert_eq!(AuthnLevel::Verified.to_string(), "verified");
+    }
+
+    #[test]
+    fn test_authn_level_as_str() {
+        assert_eq!(AuthnLevel::Public.as_str(), "public");
+        assert_eq!(AuthnLevel::Authenticated.as_str(), "authenticated");
+        assert_eq!(AuthnLevel::Verified.as_str(), "verified");
+    }
+
+    #[test]
+    fn test_frontmatter_with_authn() {
+        let content = "---\ntitle: Admin Page\nauthn: authenticated\n---\n# Admin";
+        let (fm, _) = parse_frontmatter(content, &PathBuf::from("admin.md")).unwrap();
+        assert_eq!(fm.title, Some("Admin Page".to_string()));
+        assert!(matches!(fm.authn, Some(AuthnLevel::Authenticated)));
+    }
+
+    #[test]
+    fn test_frontmatter_with_authz() {
+        let content = "---\ntitle: Admin Page\nauthz:\n  - admin\n  - editor\n---\n# Admin";
+        let (fm, _) = parse_frontmatter(content, &PathBuf::from("admin.md")).unwrap();
+        assert_eq!(
+            fm.authz,
+            Some(vec!["admin".to_string(), "editor".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_with_fallback() {
+        let content = "---\ntitle: Secret\nfallback: /docs/access-denied\n---\n# Secret";
+        let (fm, _) = parse_frontmatter(content, &PathBuf::from("secret.md")).unwrap();
+        assert_eq!(fm.fallback, Some("/docs/access-denied".to_string()));
+    }
+
+    #[test]
+    fn test_frontmatter_full_auth() {
+        let content = r#"---
+title: Protected Content
+authn: verified
+authz:
+  - admin
+fallback: /signin
+---
+# Protected"#;
+        let (fm, remaining) = parse_frontmatter(content, &PathBuf::from("protected.md")).unwrap();
+        assert_eq!(fm.title, Some("Protected Content".to_string()));
+        assert!(matches!(fm.authn, Some(AuthnLevel::Verified)));
+        assert_eq!(fm.authz, Some(vec!["admin".to_string()]));
+        assert_eq!(fm.fallback, Some("/signin".to_string()));
+        assert!(remaining.starts_with("# Protected"));
     }
 }
