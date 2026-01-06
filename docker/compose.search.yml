@@ -1,0 +1,82 @@
+# mdbook-htmx Docker Compose - Search Overlay
+# Phase 4: Meilisearch integration for full-text search
+#
+# Usage:
+#   docker compose -f compose.yml -f compose.search.yml up -d
+#
+# This overlay adds:
+#   - Meilisearch for full-text search
+#   - Search indexer for populating the index
+#   - NGINX updates for search endpoint proxying
+
+services:
+  # Override nginx to add search proxy
+  nginx:
+    depends_on:
+      meilisearch:
+        condition: service_healthy
+    environment:
+      - SEARCH_ENABLED=true
+    volumes:
+      - ./nginx-search.conf:/etc/nginx/conf.d/search.conf:ro
+
+  # Meilisearch search engine
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    container_name: mdbook-htmx-search
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_ENV=development
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-masterkey}
+      - MEILI_NO_ANALYTICS=true
+    volumes:
+      - meilisearch-data:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Search indexer - runs once to populate the index
+  search-indexer:
+    image: curlimages/curl:latest
+    container_name: mdbook-htmx-indexer
+    depends_on:
+      meilisearch:
+        condition: service_healthy
+    volumes:
+      - ../book/htmx:/data:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Meilisearch..."
+        sleep 2
+        echo "Creating docs index..."
+        curl -X POST "http://meilisearch:7700/indexes" \
+          -H "Authorization: Bearer $${MEILI_MASTER_KEY:-masterkey}" \
+          -H "Content-Type: application/json" \
+          -d '{"uid":"docs","primaryKey":"path"}'
+
+        echo "Uploading search index..."
+        if [ -f /data/search-index.json ]; then
+          # Extract documents array from our search index
+          cat /data/search-index.json | jq '.documents' | \
+          curl -X POST "http://meilisearch:7700/indexes/docs/documents" \
+            -H "Authorization: Bearer $${MEILI_MASTER_KEY:-masterkey}" \
+            -H "Content-Type: application/json" \
+            -d @-
+          echo "Search index uploaded successfully"
+        else
+          echo "Warning: search-index.json not found"
+        fi
+    restart: "no"
+
+volumes:
+  meilisearch-data:
+    name: mdbook-htmx-search
+
+networks:
+  default:
+    name: mdbook-htmx
