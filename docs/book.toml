@@ -1,0 +1,48 @@
+[book]
+title = "mdbook-htmx"
+authors = ["aRustyDev"]
+language = "en"
+description = "HTMX-powered documentation sites with mdBook"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = true
+
+[output.htmx]
+version = "1.0"
+htmx-version = "1.9.10"
+boost = true
+swap-strategy = "innerHTML"
+target = "#content"
+push-url = true
+output-mode = "both"
+
+[output.htmx.navigation]
+breadcrumbs = true
+toc = true
+prev-next = true
+collapsible-sidebar = true
+
+[output.htmx.search]
+enabled = true
+generate-index = true
+index-content = true
+heading-split-level = 3
+include-auth = true
+
+[output.htmx.assets]
+hash-assets = true
+sri-enabled = true
+
+[output.htmx.authn]
+provider = "none"
+signin = "/auth/login"
+signout = "/auth/logout"
+session-cookie = "session"
+
+[output.htmx.authz]
+default-access = "public"
+default-fallback = "/access-denied"
+role-claim = "roles"
+strict = false
