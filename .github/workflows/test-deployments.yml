@@ -110,18 +110,68 @@ jobs:
             --set ingress.hosts[0].paths[0].path=/ \
             --set ingress.hosts[0].paths[0].pathType=Prefix
 
+  helm-verify:
+    name: Helm Verify (OCI + Cosign)
+    runs-on: ubuntu-latest
+    env:
+      CHART_REGISTRY: ghcr.io/arustydev/charts
+      CHART_NAME: mdbook-htmx
+      CHART_VERSION: 0.2.1
+    steps:
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify chart signature
+        run: |
+          echo "🔏 Verifying signature for $CHART_NAME:$CHART_VERSION..."
+          cosign verify $CHART_REGISTRY/$CHART_NAME:$CHART_VERSION \
+            --certificate-identity-regexp="https://github.com/aRustyDev/helm-charts/.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+          echo "✅ Signature verification passed"
+
+      - name: Pull and inspect chart from OCI
+        run: |
+          echo "📦 Pulling chart from OCI registry..."
+          helm pull oci://$CHART_REGISTRY/$CHART_NAME --version $CHART_VERSION
+
+          echo "📋 Chart contents:"
+          tar -tzf ${CHART_NAME}-${CHART_VERSION}.tgz
+
+          echo "✅ OCI pull successful"
+
+      - name: Verify chart provenance (SLSA)
+        continue-on-error: true
+        run: |
+          echo "🔍 Checking for SLSA provenance attestation..."
+          cosign verify-attestation $CHART_REGISTRY/$CHART_NAME:$CHART_VERSION \
+            --type slsaprovenance \
+            --certificate-identity-regexp="https://github.com/aRustyDev/helm-charts/.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" || \
+          echo "⚠️ No SLSA provenance attestation found (optional)"
+
   helm-install:
     name: Helm Install (kind)
     runs-on: ubuntu-latest
-    needs: helm-lint
+    needs: [helm-lint, helm-verify]
+    env:
+      CHART_REGISTRY: ghcr.io/arustydev/charts
+      CHART_NAME: mdbook-htmx
+      CHART_VERSION: 0.2.1
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: aRustyDev/helm-charts
-          path: helm-charts
-
       - name: Setup Helm
         uses: azure/setup-helm@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify chart signature before install
+        run: |
+          cosign verify $CHART_REGISTRY/$CHART_NAME:$CHART_VERSION \
+            --certificate-identity-regexp="https://github.com/aRustyDev/helm-charts/.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 
       - name: Create kind cluster
         uses: helm/kind-action@v1
@@ -131,9 +181,10 @@ jobs:
           kubectl create configmap mdbook-content \
             --from-literal=index.html='<!DOCTYPE html><html><body>Test</body></html>'
 
-      - name: Install chart
+      - name: Install chart from OCI registry
         run: |
-          helm install test helm-charts/charts/mdbook-htmx \
+          helm install test oci://$CHART_REGISTRY/$CHART_NAME \
+            --version $CHART_VERSION \
             --set contentConfigMap=mdbook-content \
             --wait --timeout 2m
 
