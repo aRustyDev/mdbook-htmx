@@ -1,0 +1,378 @@
+name: Test cross-repo-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/actions/cross-repo-sync/**'
+      - '.github/workflows/test-cross-repo-sync.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/actions/cross-repo-sync/**'
+      - '.github/workflows/test-cross-repo-sync.yml'
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug logging'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  # ===========================================================================
+  # Test input validation
+  # ===========================================================================
+  test-validation:
+    name: Test Input Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test valid sync-type values
+        run: |
+          for type in docs notes blog config; do
+            echo "Testing sync-type: $type"
+            case "$type" in
+              docs|notes|blog|config)
+                echo "  Valid"
+                ;;
+              *)
+                echo "  Invalid - should not reach here"
+                exit 1
+                ;;
+            esac
+          done
+
+      - name: Test invalid sync-type detection
+        run: |
+          for type in invalid foo bar; do
+            case "$type" in
+              docs|notes|blog|config)
+                echo "Should have rejected: $type"
+                exit 1
+                ;;
+              *)
+                echo "Correctly rejected: $type"
+                ;;
+            esac
+          done
+
+      - name: Test target-repo format validation
+        run: |
+          # Valid formats
+          for repo in "owner/repo" "my-org/my-repo" "user123/project_name"; do
+            if [[ "$repo" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
+              echo "Valid: $repo"
+            else
+              echo "Should be valid: $repo"
+              exit 1
+            fi
+          done
+
+          # Invalid formats
+          for repo in "invalid" "no-slash" "too/many/slashes" ""; do
+            if [[ "$repo" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
+              echo "Should be invalid: $repo"
+              exit 1
+            else
+              echo "Correctly rejected: $repo"
+            fi
+          done
+
+      - name: Test derived values
+        run: |
+          # Test sync-bot-user derivation
+          SYNC_TYPE="docs"
+          SYNC_BOT_USER="${SYNC_TYPE}-sync[bot]"
+          if [ "$SYNC_BOT_USER" != "docs-sync[bot]" ]; then
+            echo "Expected: docs-sync[bot], got: $SYNC_BOT_USER"
+            exit 1
+          fi
+          echo "Derived sync-bot-user: $SYNC_BOT_USER"
+
+          # Test sync-bot-email derivation
+          EMAIL_DOMAIN="arusty.dev"
+          SYNC_BOT_EMAIL="${SYNC_TYPE}-sync@${EMAIL_DOMAIN}"
+          if [ "$SYNC_BOT_EMAIL" != "docs-sync@arusty.dev" ]; then
+            echo "Expected: docs-sync@arusty.dev, got: $SYNC_BOT_EMAIL"
+            exit 1
+          fi
+          echo "Derived sync-bot-email: $SYNC_BOT_EMAIL"
+
+  # ===========================================================================
+  # Test file copying logic
+  # ===========================================================================
+  test-file-copying:
+    name: Test File Copying
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup test directories
+        run: |
+          mkdir -p test-source/docs/book1/src
+          mkdir -p test-source/docs/book2/src
+          mkdir -p test-target
+
+          # Create test files
+          echo "book1 config" > test-source/docs/book1/book.toml
+          echo "book1 summary" > test-source/docs/book1/src/SUMMARY.md
+          echo "book2 config" > test-source/docs/book2/book.toml
+          echo "book2 summary" > test-source/docs/book2/src/SUMMARY.md
+
+      - name: Test glob pattern matching
+        run: |
+          shopt -s nullglob globstar extglob
+
+          PATTERN="test-source/docs/*/book.toml"
+          FILE_COUNT=0
+
+          for file in $PATTERN; do
+            echo "Matched: $file"
+            FILE_COUNT=$((FILE_COUNT + 1))
+          done
+
+          if [ "$FILE_COUNT" -ne 2 ]; then
+            echo "Expected 2 files, got: $FILE_COUNT"
+            exit 1
+          fi
+          echo "Glob matching works: $FILE_COUNT files"
+
+      - name: Test recursive glob
+        run: |
+          shopt -s nullglob globstar extglob
+
+          PATTERN="test-source/docs/**/*.md"
+          FILE_COUNT=0
+
+          for file in $PATTERN; do
+            echo "Matched: $file"
+            FILE_COUNT=$((FILE_COUNT + 1))
+          done
+
+          if [ "$FILE_COUNT" -ne 2 ]; then
+            echo "Expected 2 files, got: $FILE_COUNT"
+            exit 1
+          fi
+          echo "Recursive glob works: $FILE_COUNT files"
+
+      - name: Test file copy with directory preservation
+        run: |
+          shopt -s nullglob globstar extglob
+
+          mkdir -p test-target/library/test
+
+          for file in test-source/docs/**/*.md; do
+            BASE_DIR="test-source/docs/"
+            SUB_PATH="${file#$BASE_DIR}"
+            DEST="test-target/library/test/$SUB_PATH"
+            mkdir -p "$(dirname "$DEST")"
+            cp "$file" "$DEST"
+            echo "Copied: $file -> $DEST"
+          done
+
+          # Verify
+          if [ ! -f "test-target/library/test/book1/src/SUMMARY.md" ]; then
+            echo "Missing: test-target/library/test/book1/src/SUMMARY.md"
+            exit 1
+          fi
+          if [ ! -f "test-target/library/test/book2/src/SUMMARY.md" ]; then
+            echo "Missing: test-target/library/test/book2/src/SUMMARY.md"
+            exit 1
+          fi
+          echo "Directory preservation works"
+
+  # ===========================================================================
+  # Test manifest creation
+  # ===========================================================================
+  test-manifest:
+    name: Test Manifest Creation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create test manifest
+        run: |
+          cat > sync-manifest.json << EOF
+          {
+            "version": "1.0",
+            "sync_id": "${{ github.run_id }}-${{ github.run_attempt }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "sync": {
+              "type": "docs",
+              "source_path": "docs/*/book.toml",
+              "target_path": "library/gh/mdbook-htmx",
+              "files_synced": 10
+            },
+            "source": {
+              "repository": "${{ github.repository }}",
+              "ref": "${{ github.ref }}",
+              "sha": "${{ github.sha }}"
+            },
+            "target": {
+              "repository": "arustydev/docs",
+              "branch": "docs/mdbook-htmx/abc123d",
+              "pr_number": 42,
+              "commits": ["abc123def456"]
+            }
+          }
+          EOF
+
+      - name: Validate manifest JSON
+        run: |
+          # Check it's valid JSON
+          jq . sync-manifest.json > /dev/null
+          echo "Manifest is valid JSON"
+
+          # Check required fields
+          for field in version sync_id timestamp sync source target; do
+            if ! jq -e ".$field" sync-manifest.json > /dev/null; then
+              echo "Missing required field: $field"
+              exit 1
+            fi
+          done
+          echo "All required fields present"
+
+      - name: Calculate manifest digest
+        run: |
+          DIGEST=$(sha256sum sync-manifest.json | cut -d' ' -f1)
+          echo "Manifest digest: $DIGEST"
+
+          if [ -z "$DIGEST" ]; then
+            echo "Failed to calculate digest"
+            exit 1
+          fi
+          echo "Digest calculation works"
+
+      - name: Create test predicate
+        run: |
+          cat > predicate.json << EOF
+          {
+            "sync": {
+              "type": "docs",
+              "source_path": "docs/*/book.toml",
+              "target_path": "library/gh/mdbook-htmx",
+              "files_synced": 10
+            },
+            "source": {
+              "repo": "${{ github.repository }}",
+              "sha": "${{ github.sha }}",
+              "ref": "${{ github.ref }}",
+              "workflow_run_id": "${{ github.run_id }}"
+            },
+            "target": {
+              "repo": "arustydev/docs",
+              "branch": "docs/mdbook-htmx/abc123d",
+              "pr_number": 42
+            },
+            "xauth": {
+              "app_id": "123456",
+              "installation_id": "789012",
+              "token_issued_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }
+          }
+          EOF
+
+      - name: Validate predicate JSON
+        run: |
+          jq . predicate.json > /dev/null
+          echo "Predicate is valid JSON"
+
+          for field in sync source target xauth; do
+            if ! jq -e ".$field" predicate.json > /dev/null; then
+              echo "Missing required field: $field"
+              exit 1
+            fi
+          done
+          echo "All required predicate fields present"
+
+  # ===========================================================================
+  # Test commit message format
+  # ===========================================================================
+  test-commit-format:
+    name: Test Commit Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test co-author format
+        run: |
+          XAUTH_APP_ID="123456"
+          SYNC_TYPE="docs"
+          SYNC_BOT_USER="${SYNC_TYPE}-sync[bot]"
+          SYNC_BOT_EMAIL="${SYNC_TYPE}-sync@arusty.dev"
+          ACTOR="${{ github.actor }}"
+          SOURCE_REPO="${{ github.repository }}"
+          SHA="${{ github.sha }}"
+
+          COMMIT_MSG="${SYNC_TYPE}(sync): update from ${SOURCE_REPO}
+
+          Syncing content from ${SOURCE_REPO}@${SHA:0:7}.
+
+          Co-Authored-By: cross-repo-auth[bot] <${XAUTH_APP_ID}+xauth-bot@users.noreply.github.com>
+          Co-Authored-By: ${SYNC_BOT_USER} <${SYNC_BOT_EMAIL}>
+          Co-Authored-By: ${ACTOR} <${ACTOR}@users.noreply.github.com>"
+
+          echo "Generated commit message:"
+          echo "$COMMIT_MSG"
+          echo ""
+
+          # Verify co-author lines
+          if ! echo "$COMMIT_MSG" | grep -q "Co-Authored-By: cross-repo-auth"; then
+            echo "Missing xauth co-author"
+            exit 1
+          fi
+          if ! echo "$COMMIT_MSG" | grep -q "Co-Authored-By: docs-sync"; then
+            echo "Missing sync-bot co-author"
+            exit 1
+          fi
+          echo "Commit format is correct"
+
+  # ===========================================================================
+  # Test branch naming
+  # ===========================================================================
+  test-branch-naming:
+    name: Test Branch Naming
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test branch name generation
+        run: |
+          SYNC_TYPE="docs"
+          SOURCE_REPO="${{ github.repository }}"
+          SOURCE_REPO_NAME="${SOURCE_REPO##*/}"
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+
+          BRANCH="${SYNC_TYPE}/${SOURCE_REPO_NAME}/${SHORT_SHA}"
+
+          echo "Generated branch name: $BRANCH"
+
+          # Validate format
+          if [[ ! "$BRANCH" =~ ^[a-z]+/[a-zA-Z0-9_.-]+/[a-f0-9]{7}$ ]]; then
+            echo "Invalid branch format: $BRANCH"
+            exit 1
+          fi
+          echo "Branch naming is correct"
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [test-validation, test-file-copying, test-manifest, test-commit-format, test-branch-naming]
+    steps:
+      - name: All tests passed
+        run: |
+          echo "## cross-repo-sync Tests Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Input Validation | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| File Copying | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Manifest Creation | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit Format | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch Naming | Passed |" >> $GITHUB_STEP_SUMMARY

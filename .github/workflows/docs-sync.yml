@@ -1,0 +1,98 @@
+name: Sync Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run (skip actual sync)'
+        required: false
+        default: 'false'
+        type: boolean
+
+# Permissions required for attestation
+permissions:
+  id-token: write
+  attestations: write
+  contents: read
+
+jobs:
+  sync:
+    name: Sync to arustydev/docs
+    runs-on: ubuntu-latest
+    # Only run if xauth secrets are configured
+    if: ${{ vars.XAUTH_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Get cross-repo token from xauth
+      # TODO: Uncomment when xauth is deployed
+      # - name: Get cross-repo token
+      #   id: xauth
+      #   uses: arustydev/gha/cross-repo-auth@v1
+      #   with:
+      #     app-id: ${{ secrets.XAUTH_APP_ID }}
+      #     private-key: ${{ secrets.XAUTH_PRIVATE_KEY }}
+      #     target-repos: arustydev/docs
+
+      # Sync docs to central docs repo
+      # TODO: Uncomment when xauth is deployed
+      # - name: Sync docs
+      #   if: ${{ inputs.dry-run != 'true' }}
+      #   uses: ./.github/actions/cross-repo-sync
+      #   with:
+      #     token: ${{ steps.xauth.outputs.token }}
+      #     sync-type: docs
+      #     source-convention: 'docs/**/*'
+      #     target-repo: arustydev/docs
+      #     target-path: 'library/gh/${{ github.event.repository.name }}'
+      #     xauth-app-id: ${{ steps.xauth.outputs.app-id }}
+      #     xauth-installation-id: ${{ steps.xauth.outputs.installation-id }}
+      #     xauth-issued-at: ${{ steps.xauth.outputs.issued-at }}
+      #     pr-labels: 'automated,docs-sync'
+
+      - name: Placeholder
+        run: |
+          echo "## Docs Sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Docs sync is not yet enabled." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To enable:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Deploy xauth GitHub App" >> $GITHUB_STEP_SUMMARY
+          echo "2. Configure XAUTH_APP_ID and XAUTH_PRIVATE_KEY secrets" >> $GITHUB_STEP_SUMMARY
+          echo "3. Set XAUTH_ENABLED repository variable to 'true'" >> $GITHUB_STEP_SUMMARY
+          echo "4. Uncomment workflow steps" >> $GITHUB_STEP_SUMMARY
+
+  # Dry run for testing
+  dry-run:
+    name: Dry Run
+    runs-on: ubuntu-latest
+    if: ${{ inputs.dry-run == 'true' || vars.XAUTH_ENABLED != 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List files to sync
+        run: |
+          echo "## Files that would be synced" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          find docs -type f | head -50 >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          FILE_COUNT=$(find docs -type f | wc -l)
+          echo "Total files: $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
+
+      - name: Show sync configuration
+        run: |
+          echo "## Sync Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | \`docs/**/*\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Repo | \`arustydev/docs\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Path | \`library/gh/${{ github.event.repository.name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Sync Type | \`docs\` |" >> $GITHUB_STEP_SUMMARY
