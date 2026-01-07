@@ -1,0 +1,485 @@
+name: 'Cross-Repo Sync'
+description: 'Synchronizes content between repositories with attestation support. Uses tokens from xauth GitHub App.'
+author: 'aRustyDev'
+
+branding:
+  icon: 'git-pull-request'
+  color: 'blue'
+
+inputs:
+  # Required inputs
+  token:
+    description: 'GitHub token from xauth App'
+    required: true
+  sync-type:
+    description: 'Type of sync (docs, notes, blog, config)'
+    required: true
+  source-convention:
+    description: 'Glob pattern for source files (e.g., docs/*/book.toml)'
+    required: true
+  target-repo:
+    description: 'Target repository (owner/repo)'
+    required: true
+  target-path:
+    description: 'Destination path in target repo'
+    required: true
+
+  # xauth inputs (from xauth outputs)
+  xauth-app-id:
+    description: 'GitHub App ID from xauth'
+    required: true
+  xauth-installation-id:
+    description: 'Installation ID from xauth'
+    required: true
+  xauth-issued-at:
+    description: 'Token issuance timestamp from xauth'
+    required: true
+
+  # Optional inputs
+  git-user:
+    description: 'Git user name for commits'
+    required: false
+    default: 'cross-repo-sync[bot]'
+  git-email:
+    description: 'Git email for commits'
+    required: false
+    default: 'cross-repo-sync[bot]@users.noreply.github.com'
+  sync-bot-user:
+    description: 'Sync-specific bot name (default: <sync-type>-sync[bot])'
+    required: false
+  sync-bot-email:
+    description: 'Sync-specific bot email'
+    required: false
+  email-domain:
+    description: 'Email domain for sync bot (default: arusty.dev)'
+    required: false
+    default: 'arusty.dev'
+  pr-title:
+    description: 'PR title override'
+    required: false
+  pr-labels:
+    description: 'Additional PR labels (comma-separated)'
+    required: false
+  enable-attestation:
+    description: 'Create attestation for sync (default: true)'
+    required: false
+    default: 'true'
+
+outputs:
+  pr-number:
+    description: 'Created PR number'
+    value: ${{ steps.pr.outputs.number }}
+  pr-url:
+    description: 'URL to the created PR'
+    value: ${{ steps.pr.outputs.url }}
+  branch:
+    description: 'Feature branch name'
+    value: ${{ steps.branch.outputs.name }}
+  commit-sha:
+    description: 'Commit SHA in target repo'
+    value: ${{ steps.commit.outputs.sha }}
+  attestation-id:
+    description: 'Attestation ID (if enabled)'
+    value: ${{ steps.attest.outputs.attestation-id || 'UNATTESTED' }}
+  manifest-digest:
+    description: 'SHA256 digest of sync-manifest.json'
+    value: ${{ steps.manifest.outputs.digest }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ==========================================================================
+    # PHASE 1: SETUP
+    # ==========================================================================
+
+    - name: Validate inputs
+      id: validate
+      shell: bash
+      run: |
+        # Validate sync-type
+        case "${{ inputs.sync-type }}" in
+          docs|notes|blog|config)
+            echo "sync_type=${{ inputs.sync-type }}" >> $GITHUB_OUTPUT
+            ;;
+          *)
+            echo "::error::Invalid sync-type: ${{ inputs.sync-type }}. Must be one of: docs, notes, blog, config"
+            exit 1
+            ;;
+        esac
+
+        # Validate target-repo format
+        if [[ ! "${{ inputs.target-repo }}" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
+          echo "::error::Invalid target-repo format: ${{ inputs.target-repo }}. Expected: owner/repo"
+          exit 1
+        fi
+
+        # Set derived values
+        SYNC_BOT_USER="${{ inputs.sync-bot-user }}"
+        if [ -z "$SYNC_BOT_USER" ]; then
+          SYNC_BOT_USER="${{ inputs.sync-type }}-sync[bot]"
+        fi
+        echo "sync_bot_user=$SYNC_BOT_USER" >> $GITHUB_OUTPUT
+
+        SYNC_BOT_EMAIL="${{ inputs.sync-bot-email }}"
+        if [ -z "$SYNC_BOT_EMAIL" ]; then
+          SYNC_BOT_EMAIL="${{ inputs.sync-type }}-sync@${{ inputs.email-domain }}"
+        fi
+        echo "sync_bot_email=$SYNC_BOT_EMAIL" >> $GITHUB_OUTPUT
+
+    - name: Clone target repo
+      id: clone
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        echo "::group::Cloning target repository"
+        git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ inputs.target-repo }}.git" target
+        echo "::endgroup::"
+
+    - name: Create worktree with feature branch
+      id: branch
+      shell: bash
+      working-directory: target
+      run: |
+        # Branch naming: <sync-type>/<source-repo-name>/<short-sha>
+        SOURCE_REPO_NAME="${GITHUB_REPOSITORY##*/}"
+        SHORT_SHA="${GITHUB_SHA:0:7}"
+        BRANCH="${{ inputs.sync-type }}/${SOURCE_REPO_NAME}/${SHORT_SHA}"
+
+        echo "::group::Creating worktree"
+        git worktree add ../target-worktree -b "$BRANCH"
+        echo "::endgroup::"
+
+        echo "name=$BRANCH" >> $GITHUB_OUTPUT
+        echo "source_repo_name=$SOURCE_REPO_NAME" >> $GITHUB_OUTPUT
+
+    # ==========================================================================
+    # PHASE 2: SYNC
+    # ==========================================================================
+
+    - name: Copy files from source to target
+      id: copy
+      shell: bash
+      run: |
+        echo "::group::Copying files"
+
+        # Enable extended globbing
+        shopt -s nullglob globstar extglob
+
+        # Expand the glob pattern
+        SOURCE_PATTERN="${GITHUB_WORKSPACE}/${{ inputs.source-convention }}"
+        TARGET_DIR="../target-worktree/${{ inputs.target-path }}"
+
+        # Create target directory
+        mkdir -p "$TARGET_DIR"
+
+        # Find and copy files
+        FILE_COUNT=0
+        FILES_LIST=""
+
+        # Handle glob expansion
+        for file in $SOURCE_PATTERN; do
+          if [ -f "$file" ]; then
+            # Get relative path from GITHUB_WORKSPACE
+            REL_PATH="${file#${GITHUB_WORKSPACE}/}"
+            DEST_FILE="$TARGET_DIR/$(basename "$file")"
+
+            # For directory structures, preserve relative paths
+            if [[ "${{ inputs.source-convention }}" == *"**"* ]]; then
+              # Extract the base pattern directory
+              BASE_DIR=$(echo "${{ inputs.source-convention }}" | sed 's/\*\*.*//')
+              SUB_PATH="${file#${GITHUB_WORKSPACE}/${BASE_DIR}}"
+              DEST_FILE="$TARGET_DIR/$SUB_PATH"
+              mkdir -p "$(dirname "$DEST_FILE")"
+            fi
+
+            cp "$file" "$DEST_FILE"
+            FILE_COUNT=$((FILE_COUNT + 1))
+            FILES_LIST="${FILES_LIST}${REL_PATH}\n"
+            echo "  Copied: $REL_PATH"
+          elif [ -d "$file" ]; then
+            # Copy entire directory
+            cp -r "$file" "$TARGET_DIR/"
+            DIR_FILES=$(find "$file" -type f | wc -l)
+            FILE_COUNT=$((FILE_COUNT + DIR_FILES))
+            echo "  Copied directory: ${file#${GITHUB_WORKSPACE}/} ($DIR_FILES files)"
+          fi
+        done
+
+        echo "::endgroup::"
+
+        if [ "$FILE_COUNT" -eq 0 ]; then
+          echo "::warning::No files matched pattern: ${{ inputs.source-convention }}"
+        fi
+
+        echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
+        echo "files_list<<EOF" >> $GITHUB_OUTPUT
+        echo -e "$FILES_LIST" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Check for changes
+      id: changes
+      shell: bash
+      working-directory: target-worktree
+      run: |
+        if git diff --quiet && git diff --cached --quiet; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          echo "::notice::No changes detected. Skipping sync."
+        else
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Configure git
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      working-directory: target-worktree
+      run: |
+        git config user.name "${{ inputs.git-user }}"
+        git config user.email "${{ inputs.git-email }}"
+
+    - name: Commit with co-authors
+      id: commit
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      working-directory: target-worktree
+      run: |
+        git add .
+
+        # Build commit message with co-authors
+        COMMIT_MSG="${{ inputs.sync-type }}(sync): update from ${{ github.repository }}
+
+        Syncing content from ${{ github.repository }}@${GITHUB_SHA:0:7}.
+
+        Co-Authored-By: cross-repo-auth[bot] <${{ inputs.xauth-app-id }}+xauth-bot@users.noreply.github.com>
+        Co-Authored-By: ${{ steps.validate.outputs.sync_bot_user }} <${{ steps.validate.outputs.sync_bot_email }}>
+        Co-Authored-By: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>"
+
+        git commit -m "$COMMIT_MSG"
+
+        echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+    - name: Push to target
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      working-directory: target-worktree
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        git push origin "${{ steps.branch.outputs.name }}"
+
+    - name: Create draft PR
+      id: pr
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      working-directory: target-worktree
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        # Determine PR title
+        PR_TITLE="${{ inputs.pr-title }}"
+        if [ -z "$PR_TITLE" ]; then
+          PR_TITLE="${{ inputs.sync-type }}(sync): update from ${{ github.repository }}"
+        fi
+
+        # Create draft PR with placeholder body
+        PR_URL=$(gh pr create \
+          --draft \
+          --title "$PR_TITLE" \
+          --body "Sync in progress... attestation pending." \
+          --repo "${{ inputs.target-repo }}")
+
+        PR_NUMBER=$(gh pr view "$PR_URL" --json number -q .number)
+
+        echo "url=$PR_URL" >> $GITHUB_OUTPUT
+        echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+    # ==========================================================================
+    # PHASE 3: ATTESTATION
+    # ==========================================================================
+
+    - name: Create sync manifest
+      id: manifest
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      run: |
+        cat > sync-manifest.json << EOF
+        {
+          "version": "1.0",
+          "sync_id": "${{ github.run_id }}-${{ github.run_attempt }}",
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "sync": {
+            "type": "${{ inputs.sync-type }}",
+            "source_path": "${{ inputs.source-convention }}",
+            "target_path": "${{ inputs.target-path }}",
+            "files_synced": ${{ steps.copy.outputs.file_count }}
+          },
+          "source": {
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "sha": "${{ github.sha }}"
+          },
+          "target": {
+            "repository": "${{ inputs.target-repo }}",
+            "branch": "${{ steps.branch.outputs.name }}",
+            "pr_number": ${{ steps.pr.outputs.number }},
+            "commits": ["${{ steps.commit.outputs.sha }}"]
+          }
+        }
+        EOF
+
+        # Calculate digest
+        DIGEST=$(sha256sum sync-manifest.json | cut -d' ' -f1)
+        echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+        echo "path=sync-manifest.json" >> $GITHUB_OUTPUT
+
+    - name: Create predicate
+      if: steps.changes.outputs.has_changes == 'true' && inputs.enable-attestation == 'true'
+      shell: bash
+      run: |
+        cat > predicate.json << EOF
+        {
+          "sync": {
+            "type": "${{ inputs.sync-type }}",
+            "source_path": "${{ inputs.source-convention }}",
+            "target_path": "${{ inputs.target-path }}",
+            "files_synced": ${{ steps.copy.outputs.file_count }}
+          },
+          "source": {
+            "repo": "${{ github.repository }}",
+            "sha": "${{ github.sha }}",
+            "ref": "${{ github.ref }}",
+            "workflow_run_id": "${{ github.run_id }}"
+          },
+          "target": {
+            "repo": "${{ inputs.target-repo }}",
+            "branch": "${{ steps.branch.outputs.name }}",
+            "pr_number": ${{ steps.pr.outputs.number }}
+          },
+          "xauth": {
+            "app_id": "${{ inputs.xauth-app-id }}",
+            "installation_id": "${{ inputs.xauth-installation-id }}",
+            "token_issued_at": "${{ inputs.xauth-issued-at }}"
+          }
+        }
+        EOF
+
+    - name: Create attestation
+      id: attest
+      if: steps.changes.outputs.has_changes == 'true' && inputs.enable-attestation == 'true'
+      uses: actions/attest@v2
+      continue-on-error: true
+      with:
+        subject-path: sync-manifest.json
+        predicate-type: 'https://arusty.dev/attestation/cross-repo-sync/v1'
+        predicate-path: predicate.json
+
+    - name: Handle attestation failure
+      if: steps.changes.outputs.has_changes == 'true' && inputs.enable-attestation == 'true' && steps.attest.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::Attestation creation failed. PR will be marked as unattested."
+
+    # ==========================================================================
+    # PHASE 4: FINALIZE
+    # ==========================================================================
+
+    - name: Update PR body with attestation
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id || 'UNATTESTED' }}
+      run: |
+        # Build attestation section
+        if [ "${{ inputs.enable-attestation }}" == "true" ] && [ "$ATTESTATION_ID" != "UNATTESTED" ]; then
+          ATTESTATION_SECTION="## Attestation
+
+        This sync is cryptographically attested via GitHub Artifact Attestations.
+
+        | Field | Value |
+        |-------|-------|
+        | Attestation ID | \`$ATTESTATION_ID\` |
+        | Predicate Type | \`https://arusty.dev/attestation/cross-repo-sync/v1\` |
+
+        **Verify:**
+        \`\`\`bash
+        gh attestation verify sync-manifest.json \\\\
+          --repo ${{ github.repository }} \\\\
+          --predicate-type 'https://arusty.dev/attestation/cross-repo-sync/v1'
+        \`\`\`"
+        else
+          ATTESTATION_SECTION="## Attestation
+
+        :warning: **Unattested** - Attestation was disabled or failed."
+        fi
+
+        # Update PR body
+        gh pr edit ${{ steps.pr.outputs.number }} \
+          --repo "${{ inputs.target-repo }}" \
+          --body "## Summary
+
+        Automated sync from \`${{ github.repository }}\`
+
+        | Field | Value |
+        |-------|-------|
+        | Sync Type | \`${{ inputs.sync-type }}\` |
+        | Source | [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |
+        | Files | ${{ steps.copy.outputs.file_count }} files synced |
+
+        $ATTESTATION_SECTION
+
+        ---
+        _Synced by [cross-repo-sync](https://github.com/arustydev/gha/tree/main/cross-repo-sync)_"
+
+    - name: Add labels to PR
+      if: steps.changes.outputs.has_changes == 'true' && inputs.pr-labels != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        # Add sync-type label and any custom labels
+        LABELS="${{ inputs.sync-type }},${{ inputs.pr-labels }}"
+        gh pr edit ${{ steps.pr.outputs.number }} \
+          --repo "${{ inputs.target-repo }}" \
+          --add-label "$LABELS" || true
+
+    - name: Mark PR ready
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        gh pr ready ${{ steps.pr.outputs.number }} --repo "${{ inputs.target-repo }}"
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: |
+        echo "::group::Cleanup"
+        cd target 2>/dev/null && git worktree remove ../target-worktree --force 2>/dev/null || true
+        rm -rf target target-worktree sync-manifest.json predicate.json 2>/dev/null || true
+        echo "::endgroup::"
+
+    - name: Summary
+      if: steps.changes.outputs.has_changes == 'true'
+      shell: bash
+      run: |
+        echo "## Cross-Repo Sync Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| PR | [#${{ steps.pr.outputs.number }}](${{ steps.pr.outputs.url }}) |" >> $GITHUB_STEP_SUMMARY
+        echo "| Branch | \`${{ steps.branch.outputs.name }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Files Synced | ${{ steps.copy.outputs.file_count }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Attestation | \`${{ steps.attest.outputs.attestation-id || 'UNATTESTED' }}\` |" >> $GITHUB_STEP_SUMMARY
+
+    - name: No changes summary
+      if: steps.changes.outputs.has_changes != 'true'
+      shell: bash
+      run: |
+        echo "## Cross-Repo Sync - No Changes" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "No files matched the pattern or no changes detected." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- Pattern: \`${{ inputs.source-convention }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Target: \`${{ inputs.target-path }}\`" >> $GITHUB_STEP_SUMMARY
