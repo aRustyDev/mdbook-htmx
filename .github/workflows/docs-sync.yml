@@ -1,0 +1,110 @@
+name: Sync Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run (skip actual sync)'
+        required: false
+        default: 'false'
+        type: boolean
+
+# Permissions required for attestation
+permissions:
+  id-token: write
+  attestations: write
+  contents: read
+
+jobs:
+  sync:
+    name: Sync to arustydev/docs
+    runs-on: ubuntu-latest
+    # Only run if xauth is enabled
+    if: ${{ vars.XAUTH_ENABLED == 'true' && inputs.dry-run != 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Generate token from GitHub App
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.XAUTH_APP_ID }}
+          private-key: ${{ secrets.XAUTH_PRIVATE_KEY }}
+          repositories: docs
+          owner: arustydev
+
+      # Sync docs to central docs repo
+      - name: Sync docs
+        id: sync
+        uses: ./.github/actions/cross-repo-sync
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          sync-type: docs
+          source-convention: 'docs/**/*'
+          target-repo: arustydev/docs
+          target-path: 'library/gh/${{ github.event.repository.name }}'
+          xauth-app-id: ${{ vars.XAUTH_APP_ID }}
+          xauth-installation-id: ${{ steps.app-token.outputs.installation-id }}
+          xauth-issued-at: ${{ github.event.head_commit.timestamp || github.event.created_at }}
+          pr-labels: 'automated,docs-sync'
+
+      - name: Sync summary
+        run: |
+          echo "## Docs Sync Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| PR | [#${{ steps.sync.outputs.pr-number }}](${{ steps.sync.outputs.pr-url }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`${{ steps.sync.outputs.branch }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Attestation | \`${{ steps.sync.outputs.attestation-id }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  # Dry run for testing
+  dry-run:
+    name: Dry Run
+    runs-on: ubuntu-latest
+    if: ${{ inputs.dry-run == 'true' || vars.XAUTH_ENABLED != 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          echo "## Docs Sync Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ vars.XAUTH_ENABLED }}" != "true" ]; then
+            echo ":warning: **XAUTH_ENABLED is not set to 'true'**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "To enable docs sync:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Configure XAUTH_APP_ID variable" >> $GITHUB_STEP_SUMMARY
+            echo "2. Configure XAUTH_PRIVATE_KEY secret" >> $GITHUB_STEP_SUMMARY
+            echo "3. Set XAUTH_ENABLED variable to 'true'" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: List files to sync
+        run: |
+          echo "## Files that would be synced" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          find docs -type f | head -50 >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          FILE_COUNT=$(find docs -type f | wc -l)
+          echo "Total files: $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
+
+      - name: Show sync configuration
+        run: |
+          echo "## Sync Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | \`docs/**/*\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Repo | \`arustydev/docs\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Path | \`library/gh/${{ github.event.repository.name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Sync Type | \`docs\` |" >> $GITHUB_STEP_SUMMARY
