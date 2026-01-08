@@ -222,11 +222,14 @@ runs:
       shell: bash
       working-directory: target-worktree
       run: |
-        if git diff --quiet && git diff --cached --quiet; then
+        # Check for any changes including untracked files
+        if [ -z "$(git status --porcelain)" ]; then
           echo "has_changes=false" >> $GITHUB_OUTPUT
           echo "::notice::No changes detected. Skipping sync."
         else
           echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "Changes detected:"
+          git status --short
         fi
 
     - name: Configure git
