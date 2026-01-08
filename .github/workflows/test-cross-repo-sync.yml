@@ -343,15 +343,14 @@ jobs:
           SYNC_TYPE="docs"
           SOURCE_REPO="${{ github.repository }}"
           SOURCE_REPO_NAME="${SOURCE_REPO##*/}"
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
 
-          BRANCH="${SYNC_TYPE}/${SOURCE_REPO_NAME}/${SHORT_SHA}"
+          # Stable branch naming (no SHA suffix for PR update support)
+          BRANCH="${SYNC_TYPE}-sync/${SOURCE_REPO_NAME}"
 
           echo "Generated branch name: $BRANCH"
 
-          # Validate format
-          if [[ ! "$BRANCH" =~ ^[a-z]+/[a-zA-Z0-9_.-]+/[a-f0-9]{7}$ ]]; then
+          # Validate format: <type>-sync/<repo-name>
+          if [[ ! "$BRANCH" =~ ^[a-z]+-sync/[a-zA-Z0-9_.-]+$ ]]; then
             echo "Invalid branch format: $BRANCH"
             exit 1
           fi

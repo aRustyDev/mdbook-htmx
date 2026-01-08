@@ -141,10 +141,10 @@ runs:
       shell: bash
       working-directory: target
       run: |
-        # Branch naming: <sync-type>/<source-repo-name>/<short-sha>
+        # Branch naming: <sync-type>-sync/<source-repo-name>
+        # Using stable branch name (no SHA) to enable PR updates on re-runs
         SOURCE_REPO_NAME="${GITHUB_REPOSITORY##*/}"
-        SHORT_SHA="${GITHUB_SHA:0:7}"
-        BRANCH="${{ inputs.sync-type }}/${SOURCE_REPO_NAME}/${SHORT_SHA}"
+        BRANCH="${{ inputs.sync-type }}-sync/${SOURCE_REPO_NAME}"
 
         echo "::group::Creating worktree"
         git worktree add ../target-worktree -b "$BRANCH"
@@ -268,9 +268,10 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
       run: |
-        git push origin "${{ steps.branch.outputs.name }}"
+        # Use force-with-lease for stable branches (allows updating existing PRs)
+        git push --force-with-lease origin "${{ steps.branch.outputs.name }}"
 
-    - name: Create draft PR
+    - name: Create or update PR
       id: pr
       if: steps.changes.outputs.has_changes == 'true'
       shell: bash
@@ -278,23 +279,40 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
       run: |
-        # Determine PR title
-        PR_TITLE="${{ inputs.pr-title }}"
-        if [ -z "$PR_TITLE" ]; then
-          PR_TITLE="${{ inputs.sync-type }}(sync): update from ${{ github.repository }}"
+        # Check for existing open PR on this branch
+        EXISTING_PR=$(gh pr list \
+          --head "${{ steps.branch.outputs.name }}" \
+          --state open \
+          --json number \
+          --jq '.[0].number // empty' \
+          --repo "${{ inputs.target-repo }}" 2>/dev/null || true)
+
+        if [ -n "$EXISTING_PR" ]; then
+          echo "::notice::Updating existing PR #$EXISTING_PR"
+          PR_URL=$(gh pr view "$EXISTING_PR" --json url -q .url --repo "${{ inputs.target-repo }}")
+          echo "url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "number=$EXISTING_PR" >> $GITHUB_OUTPUT
+          echo "created=false" >> $GITHUB_OUTPUT
+        else
+          # Determine PR title
+          PR_TITLE="${{ inputs.pr-title }}"
+          if [ -z "$PR_TITLE" ]; then
+            PR_TITLE="${{ inputs.sync-type }}(sync): update from ${{ github.repository }}"
+          fi
+
+          # Create draft PR with placeholder body
+          PR_URL=$(gh pr create \
+            --draft \
+            --title "$PR_TITLE" \
+            --body "Sync in progress... attestation pending." \
+            --repo "${{ inputs.target-repo }}")
+
+          PR_NUMBER=$(gh pr view "$PR_URL" --json number -q .number)
+
+          echo "url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "created=true" >> $GITHUB_OUTPUT
         fi
-
-        # Create draft PR with placeholder body
-        PR_URL=$(gh pr create \
-          --draft \
-          --title "$PR_TITLE" \
-          --body "Sync in progress... attestation pending." \
-          --repo "${{ inputs.target-repo }}")
-
-        PR_NUMBER=$(gh pr view "$PR_URL" --json number -q .number)
-
-        echo "url=$PR_URL" >> $GITHUB_OUTPUT
-        echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
     # ==========================================================================
     # PHASE 3: ATTESTATION
@@ -447,7 +465,8 @@ runs:
           --add-label "$LABELS" || true
 
     - name: Mark PR ready
-      if: steps.changes.outputs.has_changes == 'true'
+      # Only mark ready if we created a new PR (not updating existing)
+      if: steps.changes.outputs.has_changes == 'true' && steps.pr.outputs.created == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
