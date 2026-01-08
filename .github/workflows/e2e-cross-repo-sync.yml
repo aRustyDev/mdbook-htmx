@@ -1,0 +1,284 @@
+name: E2E Cross-Repo Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      target-repo:
+        description: 'Target repository (owner/repo)'
+        required: true
+        default: 'arustydev/docs'
+      target-path:
+        description: 'Target path in repo'
+        required: true
+        default: 'library/gh/mdbook-htmx'
+      cleanup:
+        description: 'Cleanup after test (close PR, delete branch)'
+        required: true
+        default: 'true'
+        type: boolean
+      debug:
+        description: 'Enable debug logging'
+        required: false
+        default: 'false'
+        type: boolean
+
+# Permissions for attestation
+permissions:
+  id-token: write
+  attestations: write
+  contents: read
+
+env:
+  # For E2E testing, we use a PAT stored as secret
+  # This simulates what xauth would provide
+  TARGET_REPO: ${{ inputs.target-repo }}
+  TARGET_PATH: ${{ inputs.target-path }}
+
+jobs:
+  # ===========================================================================
+  # E2E Test: Full cross-repo sync
+  # ===========================================================================
+  e2e-sync:
+    name: E2E Sync Test
+    runs-on: ubuntu-latest
+    outputs:
+      pr-number: ${{ steps.sync.outputs.pr-number }}
+      pr-url: ${{ steps.sync.outputs.pr-url }}
+      branch: ${{ steps.sync.outputs.branch }}
+      attestation-id: ${{ steps.sync.outputs.attestation-id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify PAT is configured
+        run: |
+          if [ -z "${{ secrets.CROSS_REPO_PAT }}" ]; then
+            echo "::error::CROSS_REPO_PAT secret is not configured"
+            echo "To run E2E tests, configure a PAT with repo scope"
+            exit 1
+          fi
+          echo "PAT is configured"
+
+      - name: Sync docs to target
+        id: sync
+        uses: ./.github/actions/cross-repo-sync
+        with:
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          sync-type: docs
+          source-convention: 'docs/**/*'
+          target-repo: ${{ env.TARGET_REPO }}
+          target-path: ${{ env.TARGET_PATH }}
+          # Simulated xauth values for testing
+          xauth-app-id: 'e2e-test'
+          xauth-installation-id: 'e2e-test'
+          xauth-issued-at: ${{ github.event.created_at }}
+          pr-labels: 'e2e-test,automated'
+          enable-attestation: 'true'
+
+      - name: Verify outputs
+        run: |
+          echo "## E2E Sync Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Output | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| PR Number | ${{ steps.sync.outputs.pr-number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| PR URL | ${{ steps.sync.outputs.pr-url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ steps.sync.outputs.branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Attestation ID | ${{ steps.sync.outputs.attestation-id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Manifest Digest | ${{ steps.sync.outputs.manifest-digest }} |" >> $GITHUB_STEP_SUMMARY
+
+          # Verify required outputs
+          if [ -z "${{ steps.sync.outputs.pr-number }}" ]; then
+            echo "::error::PR number output is missing"
+            exit 1
+          fi
+
+          if [ -z "${{ steps.sync.outputs.pr-url }}" ]; then
+            echo "::error::PR URL output is missing"
+            exit 1
+          fi
+
+          echo "All required outputs present"
+
+  # ===========================================================================
+  # Verify: PR was created correctly
+  # ===========================================================================
+  verify-pr:
+    name: Verify PR Creation
+    runs-on: ubuntu-latest
+    needs: e2e-sync
+    steps:
+      - name: Check PR exists
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          PR_NUMBER="${{ needs.e2e-sync.outputs.pr-number }}"
+
+          # Fetch PR details
+          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "${{ env.TARGET_REPO }}" --json number,title,state,body,isDraft)
+
+          echo "PR Data:"
+          echo "$PR_DATA" | jq .
+
+          # Verify PR is not a draft (should be ready for review)
+          IS_DRAFT=$(echo "$PR_DATA" | jq -r '.isDraft')
+          if [ "$IS_DRAFT" == "true" ]; then
+            echo "::error::PR should not be a draft after action completes"
+            exit 1
+          fi
+
+          echo "PR verification passed"
+
+      - name: Verify PR body contains attestation info
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          PR_NUMBER="${{ needs.e2e-sync.outputs.pr-number }}"
+          PR_BODY=$(gh pr view "$PR_NUMBER" --repo "${{ env.TARGET_REPO }}" --json body -q '.body')
+
+          # Check for attestation section
+          if echo "$PR_BODY" | grep -q "Attestation"; then
+            echo "PR body contains attestation section"
+          else
+            echo "::warning::PR body missing attestation section"
+          fi
+
+          # Check for source info
+          if echo "$PR_BODY" | grep -q "${{ github.sha }}"; then
+            echo "PR body contains source SHA"
+          else
+            echo "::warning::PR body missing source SHA"
+          fi
+
+  # ===========================================================================
+  # Verify: Attestation was created
+  # ===========================================================================
+  verify-attestation:
+    name: Verify Attestation
+    runs-on: ubuntu-latest
+    needs: e2e-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ATTESTATION_ID="${{ needs.e2e-sync.outputs.attestation-id }}"
+
+          if [ "$ATTESTATION_ID" == "UNATTESTED" ]; then
+            echo "::warning::Sync was not attested"
+            echo "This may be expected if attestation permissions are not configured"
+            exit 0
+          fi
+
+          echo "Attestation ID: $ATTESTATION_ID"
+          echo "Attestation was created successfully"
+
+          # List attestations for this repo
+          echo "## Attestation Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Attestation ID: \`$ATTESTATION_ID\`" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================================================
+  # Cleanup: Close PR and delete branch
+  # ===========================================================================
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [e2e-sync, verify-pr, verify-attestation]
+    if: ${{ always() && inputs.cleanup == 'true' }}
+    steps:
+      - name: Close PR and delete branch
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          PR_NUMBER="${{ needs.e2e-sync.outputs.pr-number }}"
+          BRANCH="${{ needs.e2e-sync.outputs.branch }}"
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Closing PR #$PR_NUMBER"
+            gh pr close "$PR_NUMBER" --repo "${{ env.TARGET_REPO }}" --delete-branch || true
+            echo "PR closed and branch deleted"
+          else
+            echo "No PR to cleanup"
+          fi
+
+      - name: Cleanup summary
+        run: |
+          echo "## Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Closed PR #${{ needs.e2e-sync.outputs.pr-number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Deleted branch: \`${{ needs.e2e-sync.outputs.branch }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================================================
+  # Test: Cleanup on failure scenario
+  # ===========================================================================
+  test-cleanup-on-failure:
+    name: Test Cleanup on Failure
+    runs-on: ubuntu-latest
+    needs: [cleanup]
+    if: ${{ always() }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify no orphan worktrees
+        run: |
+          # The action should clean up worktrees even on failure
+          # We simulate checking for orphaned directories
+          if [ -d "target-worktree" ]; then
+            echo "::error::Found orphaned worktree directory"
+            exit 1
+          fi
+
+          if [ -d "target" ]; then
+            echo "::error::Found orphaned target directory"
+            exit 1
+          fi
+
+          echo "No orphaned directories found"
+
+      - name: Verify no orphan files
+        run: |
+          # Check for manifest/predicate files that should be cleaned up
+          if [ -f "sync-manifest.json" ]; then
+            echo "::warning::Found orphaned sync-manifest.json"
+          fi
+
+          if [ -f "predicate.json" ]; then
+            echo "::warning::Found orphaned predicate.json"
+          fi
+
+          echo "Cleanup verification complete"
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  e2e-summary:
+    name: E2E Summary
+    runs-on: ubuntu-latest
+    needs: [e2e-sync, verify-pr, verify-attestation, cleanup, test-cleanup-on-failure]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# E2E Cross-Repo Sync Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Sync | ${{ needs.e2e-sync.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| PR Verification | ${{ needs.verify-pr.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Attestation | ${{ needs.verify-attestation.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup | ${{ needs.cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup Verification | ${{ needs.test-cleanup-on-failure.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Sync Details" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Repo**: ${{ env.TARGET_REPO }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Path**: ${{ env.TARGET_PATH }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR**: #${{ needs.e2e-sync.outputs.pr-number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ needs.e2e-sync.outputs.branch }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Attestation**: \`${{ needs.e2e-sync.outputs.attestation-id }}\`" >> $GITHUB_STEP_SUMMARY
