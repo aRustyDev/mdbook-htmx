@@ -187,6 +187,38 @@ Co-Authored-By: john-doe <john-doe@users.noreply.github.com>
 | Push fails | Action fails, cleanup runs |
 | PR creation fails | Action fails, cleanup runs |
 
+## Testing
+
+### Unit Tests
+
+Run the unit test workflow to verify action logic:
+
+```bash
+gh workflow run test-cross-repo-sync.yml
+```
+
+### E2E Tests
+
+Run the E2E test workflow to perform an actual cross-repo sync:
+
+```bash
+# Requires CROSS_REPO_PAT secret with repo scope
+gh workflow run e2e-cross-repo-sync.yml \
+  -f target-repo=arustydev/docs \
+  -f target-path=library/gh/mdbook-htmx \
+  -f cleanup=true
+```
+
+**Prerequisites**:
+1. Configure `CROSS_REPO_PAT` secret with a PAT that has `repo` scope
+2. PAT must have write access to the target repository
+
+The E2E test:
+- Syncs docs to the target repo
+- Creates a PR with attestation
+- Verifies PR creation and attestation
+- Cleans up (closes PR, deletes branch)
+
 ## Related
 
 - [ADR-0001: Worktree Strategy](../../.claude/plans/cross-repo-sync-action/adr/0001-worktree-strategy.md)
