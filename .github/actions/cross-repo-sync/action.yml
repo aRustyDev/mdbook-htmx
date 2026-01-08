@@ -168,7 +168,7 @@ runs:
 
         # Expand the glob pattern
         SOURCE_PATTERN="${GITHUB_WORKSPACE}/${{ inputs.source-convention }}"
-        TARGET_DIR="../target-worktree/${{ inputs.target-path }}"
+        TARGET_DIR="target-worktree/${{ inputs.target-path }}"
 
         # Create target directory
         mkdir -p "$TARGET_DIR"
